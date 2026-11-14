@@ -38,7 +38,11 @@ ble_npl_time_get(void)
         return 0;
     }
 
-    return now.tv_sec * 1000.0 + now.tv_nsec / 1000000.0;
+    /* Wrap modulo 2^32 like an embedded tick counter. The Linux NPL converts a double to
+     * uint32_t here, which is undefined behaviour once the machine has been up for more than
+     * 49.7 days (found with -fsanitize=undefined on a Mac up 100 days). */
+    uint64_t ms = (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+    return (ble_npl_time_t)(uint32_t)ms;
 }
 
 

@@ -11,6 +11,7 @@ static struct ble_npl_task s_task_hci;
 void nimble_host_task(void *param);
 void ble_hci_sock_ack_handler(void *param);
 void scan_init(int seconds);
+void scan_set_name(const char *n) __attribute__((weak));
 
 static void *hci_task(void *p) { ble_hci_sock_ack_handler(p); return NULL; }
 static void *host_task(void *p) { nimble_host_task(p); return NULL; }
@@ -18,6 +19,7 @@ static void *host_task(void *p) { nimble_host_task(p); return NULL; }
 int main(int argc, char *argv[])
 {
     int seconds = argc > 1 ? atoi(argv[1]) : 20;
+    if (argc > 2 && scan_set_name) scan_set_name(argv[2]);
     nimble_port_init();
     ble_svc_gap_init();
     scan_init(seconds);
