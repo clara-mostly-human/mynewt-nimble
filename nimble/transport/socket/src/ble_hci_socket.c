@@ -86,6 +86,9 @@ struct sockaddr_hci {
 #include "nimble/hci_common.h"
 #include "nimble/nimble_npl.h"
 #include "nimble/transport.h"
+#if MYNEWT_VAL(BLE_HOST)
+#include "host/ble_hs.h"
+#endif
 #include "socket/ble_hci_socket.h"
 
 /***
@@ -444,6 +447,14 @@ ble_hci_sock_rx_msg(void)
         return -2;
     }
     if (len == 0) {
+#if MYNEWT_VAL(BLE_HOST) && MYNEWT_VAL_CHOICE(BLE_SOCK_TYPE, linux_tcp)
+        /* The controller closed the connection. Polling again would wait forever on a dead
+         * socket: drop it and reset the host so the application learns the controller is gone. */
+        close(bhss->sock);
+        bhss->sock = -1;
+        bhss->rx_off = 0;
+        ble_hs_sched_reset(BLE_HS_ECONTROLLER);
+#endif
         return -1;
     }
     bhss->rx_off += len;
