@@ -42,18 +42,29 @@ static int read_cb(uint16_t c, const struct ble_gatt_error *err, struct ble_gatt
     if (err->status != BLE_HS_EDONE && err->status != 0) {
         printf("  read %-12s (0x%04X): not available (status %d)\n", read_names[i], read_uuids[i], err->status);
     }
-    if (--reads_left == 0) finish();
+    /* ATT allows one outstanding request per connection: start the next read only now */
+    if (--reads_left == 0) {
+        finish();
+    } else {
+        void start_read(int i);
+        start_read(i + 1);
+    }
     return 0;
+}
+
+static ble_uuid16_t read_uuid_objs[sizeof read_uuids / sizeof read_uuids[0]];
+
+void start_read(int i)
+{
+    read_uuid_objs[i] = (ble_uuid16_t)BLE_UUID16_INIT(read_uuids[i]);
+    int rc = ble_gattc_read_by_uuid(conn_h, 1, 0xffff, &read_uuid_objs[i].u, read_cb, (void *)(intptr_t)i);
+    if (rc) fail("read_by_uuid", rc);
 }
 
 static void start_reads(void)
 {
     reads_left = sizeof read_uuids / sizeof read_uuids[0];
-    for (int i = 0; i < reads_left; i++) {
-        ble_uuid16_t u = BLE_UUID16_INIT(read_uuids[i]);
-        int rc = ble_gattc_read_by_uuid(conn_h, 1, 0xffff, &u.u, read_cb, (void *)(intptr_t)i);
-        if (rc) fail("read_by_uuid", rc);
-    }
+    start_read(0);
 }
 
 static int svc_cb(uint16_t c, const struct ble_gatt_error *err, const struct ble_gatt_svc *svc, void *arg)
