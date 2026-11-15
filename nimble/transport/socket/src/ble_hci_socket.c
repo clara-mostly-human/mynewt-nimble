@@ -244,7 +244,9 @@ ble_hci_sock_acl_tx(struct os_mbuf *om)
     os_mbuf_free_chain(om);
     if (i != OS_MBUF_PKTLEN(om) + 1) {
         if (i < 0) {
-            dprintf(1, "sendmsg() failed : %d\n", errno);
+            if (ble_hci_sock_state.sock >= 0) {   /* not while reconnecting */
+                dprintf(1, "sendmsg() failed : %d\n", errno);
+            }
         } else {
             dprintf(1, "sendmsg() partial write: %d\n", i);
         }
@@ -286,7 +288,9 @@ ble_hci_sock_iso_tx(struct os_mbuf *om)
     os_mbuf_free_chain(om);
     if (i != OS_MBUF_PKTLEN(om) + 1) {
         if (i < 0) {
-            dprintf(1, "sendmsg() failed : %d\n", errno);
+            if (ble_hci_sock_state.sock >= 0) {   /* not while reconnecting */
+                dprintf(1, "sendmsg() failed : %d\n", errno);
+            }
         } else {
             dprintf(1, "sendmsg() partial write: %d\n", i);
         }
@@ -335,7 +339,9 @@ ble_hci_sock_cmdevt_tx(uint8_t *hci_ev, uint8_t h4_type)
     ble_transport_free(hci_ev);
     if (i != len + 1) {
         if (i < 0) {
-            dprintf(1, "sendmsg() failed : %d\n", errno);
+            if (ble_hci_sock_state.sock >= 0) {   /* not while reconnecting */
+                dprintf(1, "sendmsg() failed : %d\n", errno);
+            }
         } else {
             dprintf(1, "sendmsg() partial write: %d\n", i);
         }
@@ -454,6 +460,11 @@ ble_hci_sock_cmdevt_tx(uint8_t *hci_ev, uint8_t h4_type)
 }
 #endif
 
+#if MYNEWT_VAL_CHOICE(BLE_SOCK_TYPE, linux_tcp)
+static int ble_hci_sock_tcp_connect(void);
+static ble_npl_time_t ble_hci_sock_reconnect_at;
+#endif
+
 static int
 ble_hci_sock_rx_msg(void)
 {
@@ -466,23 +477,34 @@ ble_hci_sock_rx_msg(void)
 
     bhss = &ble_hci_sock_state;
     if (bhss->sock < 0) {
+#if MYNEWT_VAL_CHOICE(BLE_SOCK_TYPE, linux_tcp)
+        /* The controller went away (e.g. the dongle owner rebooted the chip): try its port
+         * again every 500 ms. The host keeps retrying sync and gets through once connected. */
+        if ((int32_t)(ble_npl_time_get() - ble_hci_sock_reconnect_at) >= 0) {   /* wrap-safe */
+            ble_hci_sock_reconnect_at = ble_npl_time_get() + ble_npl_time_ms_to_ticks32(500);
+            if (ble_hci_sock_tcp_connect() == 0) {
+                dprintf(2, "socket HCI: reconnected to the controller\n");
+            }
+        }
+#endif
         return -1;
     }
     len = read(bhss->sock, bhss->rx_data + bhss->rx_off,
                sizeof(bhss->rx_data) - bhss->rx_off);
-    if (len < 0) {
+    if (len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
         return -2;
     }
-    if (len == 0) {
+    if (len <= 0) {
 #if MYNEWT_VAL(BLE_HOST) && MYNEWT_VAL_CHOICE(BLE_SOCK_TYPE, linux_tcp)
-        /* The controller closed the connection. Polling again would wait forever on a dead
-         * socket: drop it and reset the host so the application learns the controller is gone. */
+        /* The controller closed the connection or it failed. Polling again would wait forever
+         * on a dead socket: drop it and reset the host so the application learns the
+         * controller is gone; the socket is reconnected above. */
         close(bhss->sock);
         bhss->sock = -1;
         bhss->rx_off = 0;
         ble_hs_sched_reset(BLE_HS_ECONTROLLER);
 #endif
-        return -1;
+        return len == 0 ? -1 : -2;
     }
     bhss->rx_off += len;
     STATS_INCN(hci_sock_stats, ibytes, len);
@@ -658,12 +680,12 @@ ble_hci_sock_rx_ev(struct ble_npl_event *ev)
 }
 
 #if MYNEWT_VAL_CHOICE(BLE_SOCK_TYPE, linux_tcp)
+/* Connect to the controller's TCP port on localhost; the socket is non-blocking afterwards. */
 static int
-ble_hci_sock_config(void)
+ble_hci_sock_tcp_connect(void)
 {
     struct ble_hci_sock_state *bhss = &ble_hci_sock_state;
     struct sockaddr_in sin;
-    ble_npl_time_t timeout;
     int s;
     int rc;
 
@@ -675,44 +697,49 @@ ble_hci_sock_config(void)
     sin.sin_len = sizeof(sin);
 #endif
 
-#if 0
-    if (bhss->sock >= 0) {
-        close(bhss->sock);
-        bhss->sock = -1;
+    s = socket(PF_INET, SOCK_STREAM, 0);
+    if (s < 0) {
+        return -1;
     }
-#endif
-    if (bhss->sock < 0) {
-        s = socket(PF_INET, SOCK_STREAM, 0);
-        if (s < 0) {
-            goto err;
-        }
 
-        rc = connect(s, (struct sockaddr *)&sin, sizeof(sin));
-        if (rc) {
-            dprintf(1, "connect() failed: %d\n", errno);
-            goto err;
-        }
-
-        rc = 1;
-
-        rc = ioctl(s, FIONBIO, (char *)&rc);
-        if (rc) {
-            goto err;
-        }
-        bhss->sock = s;
+    rc = connect(s, (struct sockaddr *)&sin, sizeof(sin));
+    if (rc) {
+        close(s);
+        return -1;
     }
+
+    rc = 1;
+    rc = ioctl(s, FIONBIO, (char *)&rc);
+    if (rc) {
+        close(s);
+        return -1;
+    }
+
+    bhss->rx_off = 0;
+    bhss->sock = s;
+
+    return 0;
+}
+
+static int
+ble_hci_sock_config(void)
+{
+    struct ble_hci_sock_state *bhss = &ble_hci_sock_state;
+    ble_npl_time_t timeout;
+    int rc;
+
+    if (bhss->sock < 0 && ble_hci_sock_tcp_connect() != 0) {
+        dprintf(1, "connect() failed: %d\n", errno);
+        return BLE_ERR_HW_FAIL;
+    }
+
     rc = ble_npl_time_ms_to_ticks(10, &timeout);
     if (rc) {
-        goto err;
+        return BLE_ERR_HW_FAIL;
     }
     ble_npl_callout_reset(&ble_hci_sock_state.timer, timeout);
 
     return 0;
-err:
-    if (s >= 0) {
-        close(s);
-    }
-    return BLE_ERR_HW_FAIL;
 }
 #endif
 
