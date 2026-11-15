@@ -24,7 +24,7 @@
 #include "mem/mem.h"
 #include "ble_hs_priv.h"
 
-#define BLE_HCI_CMD_TIMEOUT_MS  2000
+#define BLE_HCI_CMD_TIMEOUT_MS  MYNEWT_VAL(BLE_HS_HCI_CMD_TIMEOUT)
 
 static struct ble_npl_mutex ble_hs_hci_mutex;
 static struct ble_npl_sem ble_hs_hci_sem;

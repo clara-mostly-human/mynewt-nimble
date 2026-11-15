@@ -517,6 +517,16 @@ syscfg.defs:
             Timeout used in NimBLE's host stop procedure in ms.
         value: 2000
 
+    BLE_HS_HCI_CMD_TIMEOUT:
+        description: >
+            How long, in ms, the host waits for the Command Complete or
+            Command Status event that answers an HCI command. When it does
+            not arrive in time, the host resets with BLE_HS_ETIMEOUT_HCI.
+            A controller that can stop answering for a few seconds (for
+            example while sharing its chip with another protocol stack)
+            needs a longer value.
+        value: 2000
+
     BLE_HS_SYSINIT_STAGE:
         description: >
             Sysinit stage for the NimBLE host.
