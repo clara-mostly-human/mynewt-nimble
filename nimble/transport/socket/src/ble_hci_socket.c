@@ -173,6 +173,31 @@ static struct ble_hci_sock_state {
     uint8_t rx_data[512];
 } ble_hci_sock_state;
 
+
+/* Set NIMBLE_HCI_TRACE=1 to print HCI commands and events (not advertising reports) to stderr. */
+static int ble_hci_sock_trace = -1;
+
+static void
+ble_hci_sock_trace_pkt(const char *dir, uint8_t h4_type, const uint8_t *p, int len)
+{
+    if (ble_hci_sock_trace < 0) {
+        const char *e = getenv("NIMBLE_HCI_TRACE");
+        ble_hci_sock_trace = e && *e && *e != '0';
+    }
+    if (!ble_hci_sock_trace) {
+        return;
+    }
+    if (h4_type == BLE_HCI_UART_H4_EVT && len > 2 && p[0] == BLE_HCI_EVCODE_LE_META &&
+        (p[2] == BLE_HCI_LE_SUBEV_ADV_RPT || p[2] == 0x0d)) {
+        return;
+    }
+    fprintf(stderr, "hci %s %s:", dir, h4_type == BLE_HCI_UART_H4_CMD ? "cmd" : "evt");
+    for (int i = 0; i < len && i < 64; i++) {
+        fprintf(stderr, " %02x", p[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
 #if MYNEWT_VAL_CHOICE(BLE_SOCK_TYPE, linux_tcp)
 static int s_ble_hci_device = MYNEWT_VAL(BLE_SOCK_TCP_PORT);
 #endif
@@ -292,6 +317,7 @@ ble_hci_sock_cmdevt_tx(uint8_t *hci_ev, uint8_t h4_type)
     iov[1].iov_base = hci_ev;
     if (h4_type == BLE_HCI_UART_H4_CMD) {
         len = sizeof(struct ble_hci_cmd) + hci_ev[2];
+        ble_hci_sock_trace_pkt("tx", h4_type, hci_ev, len);
         STATS_INC(hci_sock_stats, ocmd);
     } else if (h4_type == BLE_HCI_UART_H4_EVT) {
         len = sizeof(struct ble_hci_ev) + hci_ev[1];
@@ -392,6 +418,7 @@ ble_hci_sock_cmdevt_tx(uint8_t *hci_ev, uint8_t h4_type)
     len = 0;
     if (h4_type == BLE_HCI_UART_H4_CMD) {
         len = sizeof(struct ble_hci_cmd) + hci_ev[2];
+        ble_hci_sock_trace_pkt("tx", h4_type, hci_ev, len);
         STATS_INC(hci_sock_stats, ocmd);
     } else if (h4_type == BLE_HCI_UART_H4_EVT) {
         len = sizeof(struct ble_hci_ev) + hci_ev[1];
@@ -523,6 +550,7 @@ ble_hci_sock_rx_msg(void)
                 break;
             }
             memcpy(data, &bhss->rx_data[1], len - 1);
+            ble_hci_sock_trace_pkt("rx", BLE_HCI_UART_H4_EVT, data, len - 1);
             OS_ENTER_CRITICAL(sr);
             rc = ble_transport_to_hs_evt(data);
             OS_EXIT_CRITICAL(sr);
