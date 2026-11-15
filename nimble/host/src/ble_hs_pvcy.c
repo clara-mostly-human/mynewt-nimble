@@ -328,4 +328,11 @@ ble_hs_pvcy_reset(void)
 {
     ble_hs_pvcy_started = 0;
     memset(ble_hs_pvcy_irk, 0, sizeof(ble_hs_pvcy_irk));
+
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+    /* As a controller loses its resolving list on reset; sync restores the
+     * list from the store.
+     */
+    ble_hs_resolv_clear();
+#endif
 }
