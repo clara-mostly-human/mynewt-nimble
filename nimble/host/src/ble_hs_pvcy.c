@@ -81,6 +81,15 @@ ble_hs_pvcy_remove_entry(uint8_t addr_type, const uint8_t *addr)
 {
     int rc;
 
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+    ble_addr_t id_addr;
+
+    id_addr.type = addr_type % 2;
+    memcpy(id_addr.val, addr, BLE_DEV_ADDR_LEN);
+    ble_hs_resolv_remove(&id_addr);
+    return 0;
+#endif
+
     /* Need to preempt all GAP procedures (advertising, pending connections)
      * before modifying resolving list in the controller
      */
@@ -145,6 +154,22 @@ ble_hs_pvcy_add_entry(const uint8_t *addr, uint8_t addr_type,
     int rc;
 
     STATS_INC(ble_hs_stats, pvcy_add_entry);
+
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+    ble_addr_t id_addr;
+
+    if (addr_type > BLE_ADDR_RANDOM) {
+        return BLE_ERR_INV_HCI_CMD_PARMS;
+    }
+
+    id_addr.type = addr_type;
+    memcpy(id_addr.val, addr, BLE_DEV_ADDR_LEN);
+    rc = ble_hs_resolv_add(&id_addr, irk);
+    if (rc != 0) {
+        STATS_INC(ble_hs_stats, pvcy_add_entry_fail);
+    }
+    return rc;
+#endif
 
     /* No GAP procedures can be active when adding an entry to the resolving
      * list (Vol 2, Part E, 7.8.38).  Stop all GAP procedures and temporarily
@@ -215,6 +240,13 @@ ble_hs_pvcy_set_our_irk(const uint8_t *irk)
     if (memcmp(ble_hs_pvcy_irk, new_irk, 16) != 0) {
         memcpy(ble_hs_pvcy_irk, new_irk, 16);
 
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+        /* Host resolving list holds peer IRKs only; our IRK is not used to
+         * resolve, so the list stays.
+         */
+        return 0;
+#endif
+
         rc = ble_hs_pvcy_set_resolve_enabled(0);
         if (rc != 0) {
             return rc;
@@ -261,6 +293,14 @@ int
 ble_hs_pvcy_set_mode(const ble_addr_t *addr, uint8_t priv_mode)
 {
     struct ble_hci_le_set_privacy_mode_cp cmd;
+
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+    /* Resolution is done by the host, which accepts the identity address as
+     * well as RPAs, as in device privacy mode.
+     */
+    (void)cmd;
+    return 0;
+#endif
 
     if (addr->type > BLE_ADDR_RANDOM) {
         return BLE_ERR_INV_HCI_CMD_PARMS;
