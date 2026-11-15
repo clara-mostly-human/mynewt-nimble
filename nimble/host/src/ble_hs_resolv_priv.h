@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include "nimble/ble.h"
+#include "nimble/nimble_opt.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +30,13 @@ extern "C" {
 
 struct ble_gap_conn_complete;
 
-#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+/* The resolver is also built for unit tests, which run with controller
+ * privacy, so that it is tested in host's newt test.
+ */
+#define BLE_HS_RESOLV_ENABLED \
+    (MYNEWT_VAL(BLE_HOST_BASED_PRIVACY) || (MYNEWT_VAL(SELFTEST) && NIMBLE_BLE_SM))
+
+#if BLE_HS_RESOLV_ENABLED
 
 /* Host resolving list: peers' identity addresses and IRKs, as they would
  * be programmed into a controller resolving list.

@@ -440,7 +440,8 @@ syscfg.defs:
             privacy. Bonded peers' RPAs in advertising reports and connection
             complete events are reported as their identity addresses, and
             connections to an identity address use the peer's last RPA.
-            Own RPAs are not supported in this mode.
+            Own RPAs are not supported in this mode. For host-only builds;
+            requires the security manager.
         value: 0
     BLE_HOST_BASED_PRIVACY_LIST_SIZE:
         description: >

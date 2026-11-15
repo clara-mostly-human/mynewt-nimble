@@ -47,6 +47,7 @@ ble_hs_pvcy_set_addr_timeout(uint16_t timeout)
                              &cmd, sizeof(cmd), NULL, 0);
 }
 
+#if !MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
 static int
 ble_hs_pvcy_set_resolve_enabled(int enable)
 {
@@ -58,7 +59,9 @@ ble_hs_pvcy_set_resolve_enabled(int enable)
                                         BLE_HCI_OCF_LE_SET_ADDR_RES_EN),
                              &cmd, sizeof(cmd), NULL, 0);
 }
+#endif
 
+#if !MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
 static int
 ble_hs_pvcy_remove_entry_hci(uint8_t addr_type, const uint8_t *addr)
 {
@@ -75,20 +78,21 @@ ble_hs_pvcy_remove_entry_hci(uint8_t addr_type, const uint8_t *addr)
                                         BLE_HCI_OCF_LE_RMV_RESOLV_LIST),
                              &cmd, sizeof(cmd), NULL, 0);
 }
+#endif
 
 int
 ble_hs_pvcy_remove_entry(uint8_t addr_type, const uint8_t *addr)
 {
-    int rc;
-
 #if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
     ble_addr_t id_addr;
 
     id_addr.type = addr_type % 2;
     memcpy(id_addr.val, addr, BLE_DEV_ADDR_LEN);
     ble_hs_resolv_remove(&id_addr);
+
     return 0;
-#endif
+#else
+    int rc;
 
     /* Need to preempt all GAP procedures (advertising, pending connections)
      * before modifying resolving list in the controller
@@ -98,8 +102,10 @@ ble_hs_pvcy_remove_entry(uint8_t addr_type, const uint8_t *addr)
     ble_gap_preempt_done();
 
     return rc;
+#endif
 }
 
+#if !MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
 static int
 ble_hs_pvcy_clear_entries(void)
 {
@@ -107,7 +113,9 @@ ble_hs_pvcy_clear_entries(void)
                                         BLE_HCI_OCF_LE_CLR_RESOLV_LIST),
                              NULL, 0, NULL, 0);
 }
+#endif
 
+#if !MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
 static int
 ble_hs_pvcy_add_entry_hci(const uint8_t *addr, uint8_t addr_type,
                           const uint8_t *irk)
@@ -146,18 +154,20 @@ ble_hs_pvcy_add_entry_hci(const uint8_t *addr, uint8_t addr_type,
 
     return 0;
 }
+#endif
 
 int
 ble_hs_pvcy_add_entry(const uint8_t *addr, uint8_t addr_type,
                       const uint8_t *irk)
 {
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
+    ble_addr_t id_addr;
+#endif
     int rc;
 
     STATS_INC(ble_hs_stats, pvcy_add_entry);
 
 #if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
-    ble_addr_t id_addr;
-
     if (addr_type > BLE_ADDR_RANDOM) {
         return BLE_ERR_INV_HCI_CMD_PARMS;
     }
@@ -165,12 +175,7 @@ ble_hs_pvcy_add_entry(const uint8_t *addr, uint8_t addr_type,
     id_addr.type = addr_type;
     memcpy(id_addr.val, addr, BLE_DEV_ADDR_LEN);
     rc = ble_hs_resolv_add(&id_addr, irk);
-    if (rc != 0) {
-        STATS_INC(ble_hs_stats, pvcy_add_entry_fail);
-    }
-    return rc;
-#endif
-
+#else
     /* No GAP procedures can be active when adding an entry to the resolving
      * list (Vol 2, Part E, 7.8.38).  Stop all GAP procedures and temporarily
      * prevent any new ones from being started.
@@ -195,6 +200,7 @@ ble_hs_pvcy_add_entry(const uint8_t *addr, uint8_t addr_type,
 
     /* Allow GAP procedures to be started again. */
     ble_gap_preempt_done();
+#endif
 
     if (rc != 0) {
         STATS_INC(ble_hs_stats, pvcy_add_entry_fail);
@@ -226,9 +232,11 @@ ble_hs_pvcy_ensure_started(void)
 int
 ble_hs_pvcy_set_our_irk(const uint8_t *irk)
 {
+#if !MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
     uint8_t tmp_addr[6];
-    uint8_t new_irk[16];
     int rc;
+#endif
+    uint8_t new_irk[16];
 
     if (irk != NULL) {
         memcpy(new_irk, irk, 16);
@@ -240,13 +248,10 @@ ble_hs_pvcy_set_our_irk(const uint8_t *irk)
     if (memcmp(ble_hs_pvcy_irk, new_irk, 16) != 0) {
         memcpy(ble_hs_pvcy_irk, new_irk, 16);
 
-#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
-        /* Host resolving list holds peer IRKs only; our IRK is not used to
-         * resolve, so the list stays.
+        /* With host-based privacy the resolving list holds peer IRKs only
+         * and does not depend on our IRK, so it is kept.
          */
-        return 0;
-#endif
-
+#if !MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
         rc = ble_hs_pvcy_set_resolve_enabled(0);
         if (rc != 0) {
             return rc;
@@ -275,6 +280,7 @@ ble_hs_pvcy_set_our_irk(const uint8_t *irk)
         if (rc != 0) {
             return rc;
         }
+#endif
     }
 
     return 0;
@@ -292,15 +298,16 @@ ble_hs_pvcy_our_irk(const uint8_t **out_irk)
 int
 ble_hs_pvcy_set_mode(const ble_addr_t *addr, uint8_t priv_mode)
 {
-    struct ble_hci_le_set_privacy_mode_cp cmd;
-
 #if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
-    /* Resolution is done by the host, which accepts the identity address as
-     * well as RPAs, as in device privacy mode.
+    /* The host accepts a peer's identity address as well as its RPAs, as in
+     * device privacy mode.
      */
-    (void)cmd;
+    (void)addr;
+    (void)priv_mode;
+
     return 0;
-#endif
+#else
+    struct ble_hci_le_set_privacy_mode_cp cmd;
 
     if (addr->type > BLE_ADDR_RANDOM) {
         return BLE_ERR_INV_HCI_CMD_PARMS;
@@ -313,6 +320,7 @@ ble_hs_pvcy_set_mode(const ble_addr_t *addr, uint8_t priv_mode)
     return ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE,
                                         BLE_HCI_OCF_LE_SET_PRIVACY_MODE),
                              &cmd, sizeof(cmd), NULL, 0);
+#endif
 }
 
 void

@@ -36,12 +36,19 @@
  * controller privacy.
  */
 
-#include "syscfg/syscfg.h"
-
-#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY)
-
 #include <string.h>
+#include "syscfg/syscfg.h"
 #include "ble_hs_priv.h"
+
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY) && MYNEWT_VAL(BLE_CONTROLLER)
+#error "BLE_HOST_BASED_PRIVACY is for host-only builds"
+#endif
+
+#if MYNEWT_VAL(BLE_HOST_BASED_PRIVACY) && !NIMBLE_BLE_SM
+#error "BLE_HOST_BASED_PRIVACY requires the security manager"
+#endif
+
+#if BLE_HS_RESOLV_ENABLED
 
 #define BLE_HS_RESOLV_MAX MYNEWT_VAL(BLE_HOST_BASED_PRIVACY_LIST_SIZE)
 
